@@ -1,4 +1,13 @@
 {
+  "name": "seedance-ugc-control-center",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
   "dependencies": {
     "pdfkit": "^0.18.0"
   }
