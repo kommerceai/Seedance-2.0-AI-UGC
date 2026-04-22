@@ -76,6 +76,15 @@ Scripts live in `.claude/skills/storyboard/scripts/`:
 
 For automation outside Claude Code (cron, CI, web backends), `orchestrator/storyboard_agent.py` wraps each script as a Claude Agent SDK tool with a hard human-approval gate on both `render_*` calls.
 
+### Providers
+
+The storyboard skill supports two video backends, pluggable via a `providers/` package:
+
+- **Enhancor** (default) — Seedance 2 Full Access, cheapest on the market, supports `multi_frame` and `first_n_last_frames`, `full_access: true` for faces.
+- **fal.ai** (`--provider fal`) — larger model catalog (Seedance, Kling, Runway, Veo, Minimax), built-in CDN upload, native event streaming. Does NOT expose `multi_frame` — storyboards on fal always use chained rendering.
+
+Select per-run with `--provider enhancor|fal` on render scripts, or set `STORYBOARD_PROVIDER` in `.env`. Canonical `JobSpec` dataclass in `providers/base.py` defines the provider-agnostic shape; adapters live in `providers/enhancor.py` and `providers/fal.py`.
+
 ## Critical Rules
 
 ### NON-NEGOTIABLE
