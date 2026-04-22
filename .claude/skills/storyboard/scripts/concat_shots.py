@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import load_json, save_json, OUTPUTS_DIR
+from _common import load_storyboard_safe, save_json, OUTPUTS_DIR
 
 
 def ffmpeg_concat_copy(list_file, out_path):
@@ -47,7 +47,7 @@ def main():
     args = p.parse_args()
 
     sb_path = Path(args.storyboard)
-    storyboard = load_json(sb_path)
+    storyboard = load_storyboard_safe(sb_path)
 
     shots_dir = sb_path.parent / "shots"
     shot_files = sorted(shots_dir.glob("[0-9][0-9].mp4"))
@@ -55,8 +55,14 @@ def main():
         print(f"ERROR: no shot MP4s in {shots_dir}", file=sys.stderr)
         sys.exit(2)
 
-    if len(shot_files) != len(storyboard["shots"]):
-        print(f"WARNING: found {len(shot_files)} MP4s but storyboard has {len(storyboard['shots'])} shots", file=sys.stderr)
+    expected = len(storyboard["shots"])
+    if len(shot_files) != expected:
+        print(
+            f"ERROR: found {len(shot_files)} MP4s but storyboard has {expected} shots. "
+            f"Re-run render_chained.py with --start-shot N to fill gaps before concat.",
+            file=sys.stderr,
+        )
+        sys.exit(3)
 
     list_file = sb_path.parent / "concat_list.txt"
     with open(list_file, "w") as f:

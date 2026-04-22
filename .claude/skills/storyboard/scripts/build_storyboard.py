@@ -25,47 +25,50 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from _common import (
     BASE_DIR, BRANDS_PATH, PROJECTS_DIR,
     load_json, save_json,
     registry_image_paths, registry_ai_context, registry_audio_path,
 )
+from prompt_framework.compose import compose_shot_prompt
 
 DEFAULT_ROLES = ["hook", "product_reveal", "proof", "cta"]
-ROLES_3 = ["hook", "product_reveal", "cta"]
+ROLES_1 = ["cta"]
 ROLES_2 = ["hook", "cta"]
+ROLES_3 = ["hook", "product_reveal", "cta"]
 ROLES_5 = ["hook", "product_reveal", "proof", "transformation", "cta"]
 ROLES_6 = ["hook", "product_reveal", "demo", "proof", "transformation", "cta"]
 
-ROLE_MAP = {2: ROLES_2, 3: ROLES_3, 4: DEFAULT_ROLES, 5: ROLES_5, 6: ROLES_6}
+ROLE_MAP = {1: ROLES_1, 2: ROLES_2, 3: ROLES_3, 4: DEFAULT_ROLES, 5: ROLES_5, 6: ROLES_6}
+
+MIN_SHOT_DURATION = 2
+MAX_SHOTS = 6
 
 
 def split_duration(total, n):
-    """Split total seconds into n per-shot durations (each int, each >=2, sum==total)."""
+    """Split total seconds into n per-shot durations; each >= MIN_SHOT_DURATION, sum == total."""
     if n <= 0:
         return []
-    base = max(2, total // n)
+    if total < n * MIN_SHOT_DURATION:
+        raise ValueError(
+            f"cannot split {total}s into {n} shots of at least {MIN_SHOT_DURATION}s each "
+            f"(need at least {n * MIN_SHOT_DURATION}s)"
+        )
+    base = total // n
     durations = [base] * n
     remainder = total - sum(durations)
-    i = 0
-    while remainder > 0:
+    for i in range(remainder):
         durations[i % n] += 1
-        remainder -= 1
-        i += 1
-    while remainder < 0 and any(d > 2 for d in durations):
-        for j in range(n):
-            if durations[j] > 2:
-                durations[j] -= 1
-                remainder += 1
-                if remainder == 0:
-                    break
+    assert sum(durations) == total, f"split_duration broke: {durations} != {total}"
+    assert all(d >= MIN_SHOT_DURATION for d in durations)
     return durations
 
 
 def timestamp_block(duration):
     """Return the standard timestamp line for a single shot of `duration` seconds."""
     if duration < 4:
-        return f"Timeline for this shot: 00:00-{duration:02d} visual action, no dialogue."
+        return f"Timeline for this shot: 00:00-00:{duration:02d} visual action, no dialogue."
     end = duration
     dialogue_end = max(1, end - 2)
     return (
@@ -195,6 +198,11 @@ def build(args):
     mode = choose_mode(args.duration, args.mode)
     is_chained = mode == "chained"
 
+    # Enforce shot count bounds
+    if args.shots < 1 or args.shots > MAX_SHOTS:
+        print(f"ERROR: shots must be 1..{MAX_SHOTS}, got {args.shots}", file=sys.stderr)
+        sys.exit(2)
+
     # Enforce duration limits per mode
     if mode == "multi_frame" and not (4 <= args.duration <= 15):
         print(f"ERROR: multi_frame requires total duration 4-15s, got {args.duration}", file=sys.stderr)
@@ -203,22 +211,40 @@ def build(args):
         print(f"ERROR: chained mode requires at least 8s total, got {args.duration}", file=sys.stderr)
         sys.exit(2)
 
-    roles = ROLE_MAP.get(args.shots, DEFAULT_ROLES[: args.shots] if args.shots <= 4 else ROLES_6[: args.shots])
-    durations = split_duration(args.duration, args.shots)
+    roles = ROLE_MAP[args.shots]
+    try:
+        durations = split_duration(args.duration, args.shots)
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(2)
 
     shots = []
     for i, (role, dur) in enumerate(zip(roles, durations)):
-        prompt = build_shot_prompt(
-            role=role, duration=dur, idx=i + 1, total_shots=args.shots,
-            ctx=ctx, style=args.style, use_audio=bool(audio_path),
-            is_chained=is_chained, is_first_shot=(i == 0),
-        )
-        shot = {"idx": i + 1, "role": role, "duration": dur, "prompt": prompt}
+        shot = {"idx": i + 1, "role": role, "duration": dur}
         if is_chained and i > 0:
             shot["continuity_anchor"] = (
                 f"subject in a {role.replace('_', ' ')} pose, product in frame, "
                 "consistent lighting and outfit from the previous shot."
             )
+
+        if args.legacy_prompts:
+            prompt = build_shot_prompt(
+                role=role, duration=dur, idx=i + 1, total_shots=args.shots,
+                ctx=ctx, style=args.style, use_audio=bool(audio_path),
+                is_chained=is_chained, is_first_shot=(i == 0),
+            )
+        else:
+            framework_ctx = {
+                **ctx,
+                "total_shots": args.shots,
+                "format_style": args.style,
+                "use_audio": bool(audio_path),
+                "is_chained": is_chained,
+                "is_first_shot": (i == 0),
+            }
+            prompt = compose_shot_prompt(shot, framework_ctx)
+
+        shot["prompt"] = prompt
         shots.append(shot)
 
     run_id = args.run_id or f"sb_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
@@ -259,6 +285,8 @@ def main():
     p.add_argument("--mode", choices=["multi_frame", "chained"], help="override auto-pick")
     p.add_argument("--style", default="ugc", choices=["ugc", "cinematic", "podcast", "greenscreen"])
     p.add_argument("--use-audio", action="store_true")
+    p.add_argument("--legacy-prompts", action="store_true",
+                   help="Use the original single-pass prompt builder instead of the 5-layer framework.")
     p.add_argument("--run-id")
     p.add_argument("--out")
     args = p.parse_args()

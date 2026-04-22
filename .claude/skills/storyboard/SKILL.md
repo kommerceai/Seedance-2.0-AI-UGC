@@ -148,6 +148,18 @@ See `RENDER_MODES.md` for the full technical spec of both modes (fields, limits,
 
 For running this outside Claude Code (cron, CI, webhooks), see `orchestrator/storyboard_agent.py`. It wraps every script in this skill as a Claude Agent SDK tool and drives the full flow programmatically.
 
+## Five-Layer Prompt Framework
+
+Shot prompts are composed through a five-layer pipeline (see `prompt_framework/README.md`):
+
+1. **Reference deconstruction** — concrete nouns from the asset registry
+2. **Anti-AI steering** — targeted avoid-phrases per format
+3. **Time-coded architecture** — per-shot timestamps + dialogue budget
+4. **Constraint engineering** — scene-level MUST/NEVER per format + role
+5. **Specificity** — replace abstractions with concrete brand nouns
+
+`build_storyboard.py` uses the framework by default. Pass `--legacy-prompts` to fall back to the single-pass builder.
+
 ## Prompt Format — per shot
 
 Every shot prompt MUST:

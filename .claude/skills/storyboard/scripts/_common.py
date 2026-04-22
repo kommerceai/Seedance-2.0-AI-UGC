@@ -149,14 +149,24 @@ def poll_until_complete(request_id, timeout_s=1800, interval_s=20):
     return {"status": "TIMEOUT", "request_id": request_id}
 
 
-def download(url, dest_path):
-    """Download a URL to dest_path via curl."""
+def download(url, dest_path, min_bytes=1024):
+    """Download a URL to dest_path via curl. Rejects suspiciously small files."""
     Path(dest_path).parent.mkdir(parents=True, exist_ok=True)
     r = subprocess.run(
-        ["curl", "-sSL", "-o", str(dest_path), url],
+        ["curl", "-sSL", "--fail", "-o", str(dest_path), url],
         capture_output=True, text=True, timeout=600,
     )
-    return r.returncode == 0 and Path(dest_path).exists()
+    if r.returncode != 0:
+        print(f"  [download] curl failed: {r.stderr.strip()}", file=sys.stderr)
+        return False
+    p = Path(dest_path)
+    if not p.exists():
+        return False
+    size = p.stat().st_size
+    if size < min_bytes:
+        print(f"  [download] suspicious file size {size}B at {dest_path}", file=sys.stderr)
+        return False
+    return True
 
 
 def ffmpeg_last_frame(video_path, out_png):
@@ -190,7 +200,26 @@ def ensure_webhook(explicit=None):
             return f"https://webhook.site/{uuid}"
     except Exception as e:
         print(f"  [webhook] {e}", file=sys.stderr)
+    print(
+        "  [webhook] WARNING: falling back to placeholder URL. "
+        "Enhancor will accept the job but no callback will fire — polling still works. "
+        "Set WEBHOOK_URL in .env to suppress this.",
+        file=sys.stderr,
+    )
     return "https://webhook.site/placeholder"
+
+
+def load_storyboard_safe(path):
+    """Load storyboard.json with a readable error on bad input."""
+    p = Path(path)
+    if not p.exists():
+        print(f"ERROR: storyboard not found: {path}", file=sys.stderr)
+        sys.exit(2)
+    try:
+        return json.loads(p.read_text())
+    except json.JSONDecodeError as e:
+        print(f"ERROR: invalid JSON in {path}: {e}", file=sys.stderr)
+        sys.exit(2)
 
 
 def registry_image_paths(slug_category, slug):

@@ -11,11 +11,12 @@ Usage:
 import argparse
 import html
 import json
+import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import load_json
+from _common import load_storyboard_safe
 
 
 HTML_TMPL = """<!doctype html>
@@ -57,9 +58,13 @@ HTML_TMPL = """<!doctype html>
 """
 
 
-def shot_block(shot, shots_dir):
+def shot_block(shot, shots_dir, report_dir):
     mp4 = shots_dir / f"{shot['idx']:02d}.mp4"
-    video_tag = f'<video controls src="{mp4.as_posix()}"></video>' if mp4.exists() else '<em>no local MP4 yet</em>'
+    if mp4.exists():
+        rel = os.path.relpath(mp4, report_dir)
+        video_tag = f'<video controls src="{rel}"></video>'
+    else:
+        video_tag = '<em>no local MP4 yet</em>'
     return (
         f'<div class="shot">'
         f'<h3>Shot {shot["idx"]} — {shot["role"]} — {shot["duration"]}s</h3>'
@@ -76,10 +81,13 @@ def main():
     args = p.parse_args()
 
     sb_path = Path(args.storyboard)
-    sb = load_json(sb_path)
+    sb = load_storyboard_safe(sb_path)
+
+    out_path = Path(args.out) if args.out else sb_path.parent / "report.html"
+    report_dir = out_path.parent
 
     shots_dir = sb_path.parent / "shots"
-    shots_html = "\n".join(shot_block(s, shots_dir) for s in sb["shots"])
+    shots_html = "\n".join(shot_block(s, shots_dir, report_dir) for s in sb["shots"])
 
     final_video = sb.get("final_video")
     if not final_video:
@@ -89,9 +97,9 @@ def main():
 
     final_html = ""
     if final_video and Path(final_video).exists():
-        final_html = f'<div class="final"><h2>Final</h2><video controls src="{Path(final_video).as_posix()}"></video></div>'
+        rel = os.path.relpath(final_video, report_dir)
+        final_html = f'<div class="final"><h2>Final</h2><video controls src="{rel}"></video></div>'
 
-    out_path = Path(args.out) if args.out else sb_path.parent / "report.html"
     out_path.write_text(HTML_TMPL.format(
         run_id=sb["run_id"],
         mode=sb["mode"],

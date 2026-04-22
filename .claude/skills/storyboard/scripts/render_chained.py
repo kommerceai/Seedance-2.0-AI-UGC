@@ -20,7 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import (
-    ENHANCOR_API_KEY, load_json, save_json,
+    ENHANCOR_API_KEY, save_json, load_storyboard_safe,
     upload_image, upload_media, enhancor_queue,
     poll_until_complete, download, ffmpeg_last_frame,
     ensure_webhook,
@@ -56,7 +56,7 @@ def main():
     args = p.parse_args()
 
     sb_path = Path(args.storyboard)
-    storyboard = load_json(sb_path)
+    storyboard = load_storyboard_safe(sb_path)
 
     if storyboard["mode"] != "chained":
         print(f"ERROR: storyboard mode is '{storyboard['mode']}', expected 'chained'", file=sys.stderr)
