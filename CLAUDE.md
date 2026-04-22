@@ -57,7 +57,33 @@ When audio files are detected in the registry (either uploaded via Control Cente
 | `onboard` | Set up your product profile — API key, Control Center, product, audience, goals |
 | `assets` | Scan and analyze uploaded images — classifies with vision, saves AI context |
 | `ab-test` | Generate video ad variants (user chooses count, format, duration, aspect ratio) |
+| `storyboard` | Multi-shot AI video ad. `multi_frame` mode for ≤15s (one API call); `chained` mode for 20s+ (N × `first_n_last_frames` + ffmpeg concat). See `.claude/skills/storyboard/SKILL.md` |
 | `analyze my new assets` | Read and analyze any images uploaded via the Control Center |
+
+## Storyboard Pipeline
+
+For multi-shot narrative ads, use the `storyboard` skill:
+
+- **`multi_frame`** (≤15s) — one Enhancor call with `multi_frame_prompts[]`. Tightest continuity, lowest cost.
+- **`chained`** (20s+) — N × `first_n_last_frames` jobs, each shot's last frame (extracted via ffmpeg `-sseof`) becomes the next shot's `first_frame_image`. Final MP4 stitched with `ffmpeg -f concat -c copy`.
+
+Scripts live in `.claude/skills/storyboard/scripts/`:
+- `build_storyboard.py` → writes beat sheet + per-shot prompts to `storyboard.json`
+- `render_multiframe.py` → single-call mode (≤15s)
+- `render_chained.py` → N-call mode with last-frame extraction + upload + handoff
+- `concat_shots.py` → ffmpeg concat (stream-copy → re-encode fallback)
+- `build_report.py` → HTML report with final video + every shot + every prompt
+
+For automation outside Claude Code (cron, CI, web backends), `orchestrator/storyboard_agent.py` wraps each script as a Claude Agent SDK tool with a hard human-approval gate on both `render_*` calls.
+
+### Providers
+
+The storyboard skill supports two video backends, pluggable via a `providers/` package:
+
+- **Enhancor** (default) — Seedance 2 Full Access, cheapest on the market, supports `multi_frame` and `first_n_last_frames`, `full_access: true` for faces.
+- **fal.ai** (`--provider fal`) — larger model catalog (Seedance, Kling, Runway, Veo, Minimax), built-in CDN upload, native event streaming. Does NOT expose `multi_frame` — storyboards on fal always use chained rendering.
+
+Select per-run with `--provider enhancor|fal` on render scripts, or set `STORYBOARD_PROVIDER` in `.env`. Canonical `JobSpec` dataclass in `providers/base.py` defines the provider-agnostic shape; adapters live in `providers/enhancor.py` and `providers/fal.py`.
 
 ## Critical Rules
 

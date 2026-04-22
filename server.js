@@ -19,7 +19,28 @@ const INBOX_DIR = path.join(ASSETS_DIR, 'inbox');
 const PROJECTS_DIR = path.join(BASE_DIR, 'projects');
 const BRANDS_PATH = path.join(BASE_DIR, 'config', 'brands.json');
 
-const PORT = parseInt(process.env.ASSET_SERVER_PORT || '8099', 10);
+const PORT = parseInt(process.env.PORT || process.env.ASSET_SERVER_PORT || '8099', 10);
+
+// Optional HTTP Basic Auth — set CONTROL_SECRET in env to require a password.
+// If unset, the server runs open (fine for localhost dev, NOT for a public URL).
+const CONTROL_SECRET = process.env.CONTROL_SECRET || '';
+const CONTROL_USER = process.env.CONTROL_USER || 'admin';
+
+function requireAuth(req, res) {
+  if (!CONTROL_SECRET) return true; // no auth configured
+  const header = req.headers['authorization'] || '';
+  if (header.startsWith('Basic ')) {
+    const decoded = Buffer.from(header.slice(6), 'base64').toString();
+    const [user, pass] = decoded.split(':');
+    if (user === CONTROL_USER && pass === CONTROL_SECRET) return true;
+  }
+  res.writeHead(401, {
+    'WWW-Authenticate': 'Basic realm="Control Center"',
+    'Content-Type': 'text/plain',
+  });
+  res.end('Authentication required');
+  return false;
+}
 
 const CATEGORY_DIRS = { product: 'products', subject: 'subjects', mood: 'moods', audio: 'audio' };
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tiff']);
@@ -251,11 +272,20 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     });
     res.end();
     return;
   }
+
+  // Health check bypasses auth so Railway's healthcheck works.
+  if (req.method === 'GET' && urlPath === '/healthz') {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('ok');
+    return;
+  }
+
+  if (!requireAuth(req, res)) return;
 
   if (req.method === 'GET') {
     if (urlPath === '/' || urlPath === '/index.html') {
